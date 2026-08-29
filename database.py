@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     full_name TEXT,
     language TEXT DEFAULT 'ru',
+    balance_adjustment REAL DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -58,6 +59,12 @@ async def init_db() -> None:
             await conn.execute("ALTER TABLE deals ADD COLUMN card_country TEXT")
         if "card_value" not in existing_cols:
             await conn.execute("ALTER TABLE deals ADD COLUMN card_value TEXT")
+
+        cur = await conn.execute("PRAGMA table_info(users)")
+        existing_user_cols = {row[1] for row in await cur.fetchall()}
+        if "balance_adjustment" not in existing_user_cols:
+            await conn.execute("ALTER TABLE users ADD COLUMN balance_adjustment REAL DEFAULT 0")
+
         await conn.commit()
 
 
@@ -172,10 +179,14 @@ async def get_user_stats(user_id: int) -> dict:
         conn.row_factory = aiosqlite.Row
 
         cur = await conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) as balance FROM deals WHERE seller_id = ? AND status = 'completed'",
+            "SELECT COALESCE(SUM(amount), 0) as s FROM deals WHERE seller_id = ? AND status = 'completed'",
             (user_id,),
         )
-        balance = (await cur.fetchone())["balance"]
+        completed_sum = (await cur.fetchone())["s"]
+
+        cur = await conn.execute("SELECT balance_adjustment FROM users WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        balance_adjustment = row["balance_adjustment"] if row and row["balance_adjustment"] is not None else 0.0
 
         cur = await conn.execute(
             "SELECT COUNT(*) as c FROM deals WHERE seller_id = ? AND status = 'completed'", (user_id,)
@@ -187,7 +198,24 @@ async def get_user_stats(user_id: int) -> dict:
         )
         bought = (await cur.fetchone())["c"]
 
-        return {"balance": balance, "sold": sold, "bought": bought, "total": sold + bought}
+        return {
+            "completed_sum": completed_sum,
+            "balance_adjustment": balance_adjustment,
+            "balance": completed_sum + balance_adjustment,
+            "sold": sold,
+            "bought": bought,
+            "total": sold + bought,
+        }
+
+
+async def set_balance_adjustment(user_id: int, value: float) -> None:
+    """Ручная корректировка баланса (плюс/минус к сумме завершённых сделок) —
+    используется админом, например после ручной выплаты по выводу средств."""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE users SET balance_adjustment = ? WHERE user_id = ?", (value, user_id)
+        )
+        await conn.commit()
 
 
 # ---------- requisites ----------
