@@ -2,7 +2,6 @@ TEXTS = {
     "welcome": (
         "👋 Welcome to Guarant Bot!\n\n"
         "I'll help you safely complete a deal between a seller and a buyer. "
-        "During the beta test, all payments are confirmed manually by an admin.\n\n"
         "Choose an action from the menu below:"
     ),
     "menu_create_deal": "🎁 Create deal",
